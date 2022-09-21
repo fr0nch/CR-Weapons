@@ -26,7 +26,7 @@ int			m_iItemDefinitionIndex = -1,
 public Plugin myinfo = 
 {
 	name = "[CR] Weapons",
-	author = "fr4nch",
+	author = "Fr4nch",
 	version = "1.1.2",
 	url = "https://vk.com/fr4nch | https://github.com/fr0nch"
 };
