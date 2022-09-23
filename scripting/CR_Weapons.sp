@@ -1,274 +1,314 @@
 #pragma semicolon 1
 
 #include <sourcemod>
-#include <sdktools>
-#include <sdkhooks>
-#include <cstrike>
 #include <custom_rounds>
 
-#include PTaH
+#include <PTaH>
+#include <sdktools>
+#include <sdkhooks>
 
 #pragma newdecls required
 
-ArrayList	g_hWeapons[MAXPLAYERS+1];
-
-char		g_sWeapons[256];
-
-bool		g_bBlock,
-			g_bNoWeapons,
-			g_bNoKnife,
-			g_bSave,
-			g_bSaved[MAXPLAYERS+1];
-
 int			m_iItemDefinitionIndex = -1,
-			g_iClearMap;
+			m_hMyWeapons = -1;
 
-public Plugin myinfo = 
+ArrayList	weapons_list[2],
+			weapons_storage[MAXPLAYERS+1];
+
+bool		weapons_block = false,
+			weapons_save = false,
+			weapons_no_knife = false;
+
+int			weapons_clear_map = 0;
+
+public Plugin myinfo =
 {
-	name = "[CR] Weapons",
-	author = "Fr4nch",
-	version = "1.1.3",
-	url = "https://vk.com/fr4nch | https://github.com/fr0nch"
+	name	= "[CR] Weapons Equipper",
+	version	= "2.0.0",
+	author	= "Fr4nch (vk.com/fr4nch)",
+	url		= "vk.com/fr4nch | discord.gg/3Crc3nVDKa"
 };
 
 public void OnPluginStart() 
-{ 
-	if(GetEngineVersion() != Engine_CSGO) 
+{
+	if (GetEngineVersion() != Engine_CSGO)
+	{
 		SetFailState("This plugin only for CS:GO");
-	
-	for (int i = 1; i <= MaxClients; ++i)
-		if(IsClientInGame(i))
-			OnClientPutInServer(i);
+	}
 
 	m_iItemDefinitionIndex = FindSendPropInfo("CEconEntity", "m_iItemDefinitionIndex");
-}
-
-public void OnClientPutInServer(int iClient)
-{	
-	g_bSaved[iClient] = false;
-	g_hWeapons[iClient] = new ArrayList(ByteCountToCells(24));
-	SDKHook(iClient, SDKHook_WeaponCanUse, OnWeaponCanUse);
-}
-
-public void OnClientDisconnect(int iClient)
-{
-	if(g_hWeapons[iClient]) delete g_hWeapons[iClient];
-	g_bSaved[iClient] = false;
-}
-
-public void CR_OnRoundStart(KeyValues Kv)
-{
-	if (Kv)
-	{
-		KvGetString(Kv, "weapons", g_sWeapons, sizeof(g_sWeapons));			// Ключ `weapons` в который нужно вписать оружия, которые нужно выдавать
-		g_bBlock		= view_as<bool>(Kv.GetNum("block_weapons", 0));		// Не работает, если нет оружий в ключе `weapons`
-		g_bNoWeapons	= view_as<bool>(Kv.GetNum("no_weapons", 0));		// Очищает игроков от оружия
-		g_bNoKnife 		= view_as<bool>(Kv.GetNum("no_knife", 0));			// Очищает оружие, и блокирует ножи, если есть оружия в ключе `weapons`
-		g_bSave	 		= view_as<bool>(Kv.GetNum("save_weapons", 1));		// Сохраняет оружия игрока перед нестандартным раундом
-		g_iClearMap		= Kv.GetNum("clear_map", 0);						// Очищает карту от оружия | 1 - очищает в начале раунда | 2 - очищает в конце раунда | 3 - очищает в начали и конце раунда
+	m_hMyWeapons = FindSendPropInfo("CBasePlayer", "m_hMyWeapons");
 	
-		if (g_iClearMap == 1 || g_iClearMap == 3)
-		{
-			CreateTimer(1.5, ClearMapTimer);
-		}
-	}
-	else
+	for (int i = 1; i <= MaxClients; ++i)
 	{
-		if (g_bBlock)
+		if (IsClientInGame(i))
 		{
-			g_bBlock = false;
+			OnClientPutInServer(i);
 		}
 	}
 }
 
-Action ClearMapTimer(Handle timer)
+/* * * * * * * * * * * * * 
+	Clients
+ * * * * * * * * * * * * */
+
+public void OnClientPutInServer(int client)
 {
-	ClearMap();
-	//PrintToConsole(0, "#######    Карта очищена от оружия!    #######"); // Дебаг
+	weapons_storage[client] = new ArrayList(ByteCountToCells(8));
+	SDKHook(client, SDKHook_WeaponCanUse, OnWeaponCanUse);
 }
 
-public void CR_OnPlayerSpawn(int iClient, KeyValues Kv)
+public void OnClientDisconnect(int client)
 {
-	if(!CR_IsCustomRound() && g_hWeapons[iClient].Length != 0 && g_bSaved[iClient])
-	{
-		ClearWeapons(iClient);
-		RequestFrame(GiveSavedWeapons, iClient);
-	}
-	if(Kv)
-	{
-		//PrintToChat(iClient, "g_bSaved: %b", g_bSaved[iClient]);
-		//PrintToChat(iClient, "g_bSave: %b", g_bSave);
-		if(g_bNoWeapons || g_sWeapons[0]) ClearWeapons(iClient);
-		if(g_sWeapons[0]) RequestFrame(GiveWeapons, iClient);
-	}
+	delete weapons_storage[client];
+	SDKUnhook(client, SDKHook_WeaponCanUse, OnWeaponCanUse);
 }
 
-public void CR_OnRoundEnd(KeyValues Kv)
+public void CR_OnPlayerSpawn(int client, KeyValues kv)
 {
-	if(Kv)
+	if (IsClientInGame(client) && IsPlayerAlive(client))
 	{
-		for (int i = 1; i <= MaxClients; ++i)
+		if (kv)
 		{
-			if(IsClientInGame(i) && IsPlayerAlive(i))
+			if (weapons_save)
 			{
-				ClearWeapons(i);
+				SaveWeapons(client);
+			}
+			
+			ClearWeapons(client);
+			GiveWeapons(client);
 
-				if(g_bNoKnife)
-					GivePlayerItem(i, "weapon_knife_t");
-
-				FakeClientCommand(i, "use weapon_knife");
+			if (weapons_list[0].Length == 0 || weapons_list[1].Length == 0)
+			{
+				FakeClientCommand(client, "use weapon_knife");
 			}
 		}
-
-		if(g_iClearMap == 2 || g_iClearMap == 3) ClearMap();
+		else
+		{
+			if (weapons_storage[client].Length > 0)
+			{
+				ClearWeapons(client);
+				GiveWeapons(client, true);
+			}
+		}
 	}
 }
 
-void ClearWeapons(int iClient)
+Action OnWeaponCanUse(int client, int weapon) 
 {
-	if(IsClientInGame(iClient) && !IsFakeClient(iClient) && IsPlayerAlive(iClient))
+	if (weapons_block)
 	{
-		char sWeapon[24]; 
-
-		for(int iEnt, i; i <= 3; ++i)
+		if (IsWeaponKnife(weapon) && weapons_no_knife == false)
 		{
-			if(i == 2 && !g_bNoKnife) continue;
-			while ((iEnt = GetPlayerWeaponSlot(iClient, i)) != -1)
+			return Plugin_Continue;
+		}
+
+		int item_def = GetWeaponDefinition(weapon, true);
+
+		if (weapons_list[0].FindValue(item_def) == -1 && weapons_list[1].FindValue(item_def) == -1)
+		{
+			// LogMessage("Weapon \"%s\" is blocked.", GetWeaponName(item_def));
+			return Plugin_Handled;
+		}
+	}
+
+	return Plugin_Continue;
+}
+
+/* * * * * * * * * * * * * 
+	Main
+ * * * * * * * * * * * * */
+
+public void CR_OnRoundStart(KeyValues kv)
+{
+	if (kv)
+	{
+		// Weapons
+		weapons_list[0] = new ArrayList(); // Main weapons
+		weapons_list[1] = new ArrayList(); // Additional weapons for ignore
+
+		char buffer[256], weapons[10][24];
+
+		for (int i = 0; i < 2; i++)
+		{
+			kv.GetString((i == 0) ? "weapons" : "weapons_ignore", buffer, sizeof buffer);
+			TrimString(buffer);
+
+			if (buffer[0])
 			{
-				RemovePlayerItem(iClient, iEnt);
-				if (IsValidEdict(iEnt))
+				int count = ExplodeString(buffer, ",", weapons, sizeof weapons, sizeof weapons[]);
+
+				// LogMessage("%s: %s", (i == 0) ? "weapons" : "weapons_ignore", buffer);
+				
+				for (int b; b < count; ++b)
 				{
-					if (g_bSave && !g_bSaved[iClient])
-					{
-						GetWeaponName(iEnt, sWeapon, sizeof(sWeapon));
-						if (StrEqual(sWeapon, "weapon_usp_silencer"))
-						{
-							FormatEx(sWeapon, sizeof(sWeapon), "weapon_silencer");
-						}
-						if(strcmp(sWeapon, "weapon_melee") == 0)
-						{
-							switch(GetEntData(iEnt, m_iItemDefinitionIndex, 2))
-							{
-								case 75: sWeapon = "weapon_axe";
-								case 76: sWeapon = "weapon_hammer";
-								case 78: sWeapon = "weapon_spanner";
-							}
-						}
-
-						g_hWeapons[iClient].PushString(sWeapon);
-						//PrintToChat(iClient, "Сохранило оружие! %s", sWeapon);
-					}
-
-					GetEdictClassname(iEnt, sWeapon, sizeof(sWeapon)); 
-					if(StrContains(sWeapon, "weapon_", false) != -1)
-						RemoveEntity(iEnt);     
+					weapons_list[i].Push(PTaH_GetItemDefinitionByName(weapons[b]).GetDefinitionIndex());
+					// LogMessage("Added weapon in array: %s", weapons[b]);
 				}
 			}
 		}
 
-		if(g_bNoWeapons && !g_sWeapons[0]) FakeClientCommand(iClient, "use weapon_knife");
-		if(!g_bSaved[iClient]) g_bSaved[iClient] = true;	
-	}
+		// Additional parameters
+		weapons_block = view_as<bool>(kv.GetNum("weapons_block", 0));
+		weapons_save = view_as<bool>(kv.GetNum("weapons_save", 1));
+		weapons_no_knife = view_as<bool>(kv.GetNum("weapons_no_knife", 0));
+		weapons_clear_map = view_as<bool>(kv.GetNum("weapons_clear_map", 0));
 
+		if (weapons_clear_map == 1 || weapons_clear_map == 3)
+		{
+			ClearMap();
+		}
+	}
 }
 
-void GiveWeapons(int iClient)
+public void CR_OnRoundEnd(KeyValues kv)
 {
-	if(IsClientInGame(iClient) && !IsFakeClient(iClient) && IsPlayerAlive(iClient))
+	if (kv)
 	{
-		char sWeapons[10][24];
-		int count = ExplodeString(g_sWeapons, ",", sWeapons, sizeof(sWeapons), sizeof(sWeapons[]));
-		for(int i; i < count; ++i)
+		weapons_list[0].Clear();
+		weapons_list[1].Clear();
+
+		for (int i = 1; i <= MaxClients; ++i)
 		{
-			TrimString(sWeapons[i]);
-			if(!strcmp(sWeapons[i], "weapon_fists") || !strcmp(sWeapons[i], "weapon_axe") || !strcmp(sWeapons[i], "weapon_hammer") || !strcmp(sWeapons[i], "weapon_spanner"))
+			if (IsClientInGame(i) && IsPlayerAlive(i))
 			{
-				EquipPlayerWeapon(iClient, GivePlayerItem(iClient, sWeapons[i]));
-				//LogMessage("ID: %i | Выдалось сохранённое оружие - %s", iClient, sWeapons[i]);
-			}	
-			else {
-				GivePlayerItem(iClient, sWeapons[i]);
-				RequestFrame(GiveFists, iClient);
+				ClearWeapons(i);
+
+				if (weapons_no_knife)
+				{
+					EquipPlayerWeapon(i, GivePlayerItem(i, "weapon_knife"));
+				}
+				
+				FakeClientCommand(i, "use weapon_knife");
+			}
+		}
+
+		if (weapons_clear_map > 1)
+		{
+			ClearMap();
+		}
+
+		if (weapons_block)
+		{
+			weapons_block = false;
+		}
+	}
+}
+
+/* * * * * * * * * * * * * 
+	Utils
+ * * * * * * * * * * * * */
+
+bool GiveWeapons(int client, bool saved = false)
+{
+	int count = (saved) ? weapons_storage[client].Length : weapons_list[0].Length;
+
+	for (int i = 0; i < count; ++i)
+	{
+		int item = (saved) ? weapons_storage[client].Get(i) : weapons_list[0].Get(i);
+
+		if (item == 69 || item == 75 || item == 76 || item == 78)
+		{
+			EquipPlayerWeapon(client, GivePlayerItem(client, GetWeaponName(item)));
+			// LogMessage("Give weapon melee for %L: %s", client, GetWeaponName(item));
+		}
+		else
+		{
+			GivePlayerItem(client, GetWeaponName(item));
+			// LogMessage("Give weapon for %L: %s", client, GetWeaponName(item));
+		}
+	}
+
+	if (saved)
+	{
+		weapons_storage[client].Clear();
+	}
+}
+
+void SaveWeapons(int client)
+{
+	if (weapons_storage[client].Length > 0)
+	{
+		return;
+	}
+
+	for (int i = 0; i < 64; i++)
+	{
+		int ent = GetEntDataEnt2(client, m_hMyWeapons + i * 4);
+
+		if (ent != -1)
+		{
+			if (IsWeaponKnife(ent) && weapons_no_knife == false)
+			{
+				continue;
+			}
+
+			int weapon_def = GetWeaponDefinition(ent);
+			weapons_storage[client].Push(weapon_def);
+
+			// LogMessage("Weapon saved: %s", GetWeaponName(GetWeaponDefinition(ent)));
+		}
+	}
+}
+
+void ClearWeapons(int client)
+{
+	for (int i = 0; i < 64; i++)
+	{
+		int ent = GetEntDataEnt2(client, m_hMyWeapons + i * 4);
+
+		if (ent != -1)
+		{
+			if (IsWeaponKnife(ent) && weapons_no_knife == false)
+			{
+				continue;
+			}
+
+			RemovePlayerItem(client, ent);
+
+			if (IsValidEdict(ent))
+			{
+				RemoveEntity(ent);
+			}
+
+			// LogMessage("Weapon removed: %s", GetWeaponName(GetWeaponDefinition(ent, true)));
+		}
+	}
+}
+
+bool ClearMap()
+{
+	int ent = MaxClients+1;
+
+	while ((ent = FindEntityByClassname(ent, "weapon_*")) != INVALID_ENT_REFERENCE)
+	{
+		if (GetEntPropEnt(ent, Prop_Data, "m_hOwnerEntity") == -1)
+		{
+			int item_def = GetWeaponDefinition(ent, true);
+
+			if (weapons_list[0].FindValue(item_def) == -1 && weapons_list[1].FindValue(item_def) == -1)
+			{
+				RemoveEntity(ent);
 			}
 		}
 	}
 }
 
-void GiveFists(int iClient)
+bool IsWeaponKnife(int weapon)
 {
-	int iEnt = -1;
-	if((iEnt = GetPlayerWeaponSlot(iClient, 2)) != -1)
-	{
-		char sWeapon[24];
-		GetWeaponName(iEnt, sWeapon, sizeof(sWeapon));
-		if(!strcmp(sWeapon, "weapon_fists"))
-		{
-			FakeClientCommand(iClient, "use weapon_fists");
-			//PrintToConsole(0,sWeapon); // Дебаг
-		}
-	}
+	char class[8];
+	GetEntityNetClass(weapon, class, sizeof class);
+	return (strncmp(class, "CKnife", 6) == 0);
 }
 
-void GiveSavedWeapons(int iClient)
-{	
-	if (IsClientInGame(iClient) && !IsFakeClient(iClient) && IsPlayerAlive(iClient))
-	{
-		char sWeapon[24];		
-		int size = GetArraySize(g_hWeapons[iClient]);
-		for(int i = 0; i < size; ++i)
-		{
-			GetArrayString(g_hWeapons[iClient], i, sWeapon, sizeof(sWeapon));			
-			if(!strcmp(sWeapon, "weapon_fists") || !strcmp(sWeapon, "weapon_axe") || !strcmp(sWeapon, "weapon_hammer") || !strcmp(sWeapon, "weapon_spanner"))
-				EquipPlayerWeapon(iClient, GivePlayerItem(iClient, sWeapon));
-			else {
-				GivePlayerItem(iClient, sWeapon);
-				//LogMessage("ID: %i | Выдалось сохранённое оружие - %s", iClient, sWeapon);
-			}
-			//PrintToChat(iClient, "Выдал сохранённое оружие.");
-		}
-
-		ClearArray(g_hWeapons[iClient]);
-		g_bSaved[iClient] = false;
-		//PrintToChat(iClient, "g_bSaved: %b", g_bSaved[iClient]);
-	} 
-	else { ClearArray(g_hWeapons[iClient]); g_bSaved[iClient] = false; }
-}
-
-void ClearMap()
+int GetWeaponDefinition(int ent, bool prop = false)
 {
-	int iEnt = MaxClients+1;
-	while ((iEnt = FindEntityByClassname(iEnt, "weapon_*")) != INVALID_ENT_REFERENCE)
-	{
-		if(GetEntPropEnt(iEnt, Prop_Data, "m_hOwnerEntity") == -1)
-			RemoveEntity(iEnt);
-	}
+	return (prop) ? GetEntProp(ent, Prop_Send, "m_iItemDefinitionIndex") : GetEntData(ent, m_iItemDefinitionIndex, 2);
 }
 
-Action OnWeaponCanUse(int iClient, int iWeapon) 
-{ 
-	if(/*CR_IsCustomRound() &&*/ g_bBlock)
-	{
-		char sWeapon[24], sKnife[24];  
-		GetWeaponName(iWeapon, sWeapon, sizeof(sWeapon));
-		if (IsWeaponKnife(iWeapon))
-			GetWeaponName(iWeapon, sKnife, sizeof(sKnife));
-		if(StrEqual(sWeapon, sKnife, false) && !g_bNoKnife)
-			return Plugin_Continue;
-		if(StrContains(g_sWeapons, sWeapon, false) == -1)
-			return Plugin_Handled;
-	}
-	return Plugin_Continue;
-}
-
-void GetWeaponName(int iEnt, char[] sBuff, int iBuffSize)
+char GetWeaponName(int item_def)
 {
-	CEconItemDefinition pItemDefinition = PTaH_GetItemDefinitionByDefIndex(GetEntProp(iEnt, Prop_Send, "m_iItemDefinitionIndex"));
-	pItemDefinition.GetDefinitionName(sBuff, iBuffSize);
-	// PrintToChatAll("Оружие - %s", sBuff);
-}
-
-bool IsWeaponKnife(int iWeapon){
-	char sClass[8];
-	GetEntityNetClass(iWeapon, sClass, sizeof(sClass));
-	return strncmp(sClass, "CKnife", 6) == 0;
+	char buffer[32];
+	PTaH_GetItemDefinitionByDefIndex(item_def).GetDefinitionName(buffer, sizeof buffer);
+	return buffer;
 }
