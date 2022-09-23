@@ -10,7 +10,7 @@ Counter-Strike: Global Offensive
 
 Требования:
 ----------------
-- **[SourceMod 1.10 Stable](sourcemod.net/downloads.php?branch=stable) и выше.**
+- **[SourceMod 1.10](https://sm.alliedmods.net/smdrop/1.10/) и выше.**
 - **[Custom Rounds](https://github.com/SomethingFromSomewhere/Custom-Rounds) (не ниже версии 2.1, версия с HLmod не подойдёт)**
 - **[PTaH](https://ptah.zizt.ru) (не ниже версии 1.1.3 build20)**
 
