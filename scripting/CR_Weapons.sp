@@ -19,12 +19,13 @@ bool		weapons_block = false,
 			weapons_save = false,
 			weapons_no_knife = false;
 
-int			weapons_clear_map = 0;
+int			weapons_clear_map = 0,
+			weapons_no_equip_clear = 0;
 
 public Plugin myinfo =
 {
 	name	= "[CR] Weapons Equipper",
-	version	= "2.0.0",
+	version	= "2.1.0",
 	author	= "Fr4nch (vk.com/fr4nch)",
 	url		= "vk.com/fr4nch | discord.gg/3Crc3nVDKa"
 };
@@ -70,12 +71,16 @@ public void CR_OnPlayerSpawn(int client, KeyValues kv)
 	{
 		if (kv)
 		{
-			if (weapons_save)
+			if (weapons_save && weapons_no_equip_clear < 2)
 			{
 				SaveWeapons(client);
 			}
 			
-			ClearWeapons(client);
+			if (weapons_no_equip_clear < 2)
+			{
+				ClearWeapons(client);
+			}
+			
 			GiveWeapons(client);
 
 			if (weapons_list[0].Length == 0 || weapons_list[1].Length == 0)
@@ -123,14 +128,13 @@ public void CR_OnRoundStart(KeyValues kv)
 {
 	if (kv)
 	{
-		// Weapons
-		weapons_list[0] = new ArrayList(); // Main weapons
-		weapons_list[1] = new ArrayList(); // Additional weapons for ignore
-
 		char buffer[256], weapons[10][24];
 
 		for (int i = 0; i < 2; i++)
 		{
+			// Weapons
+			weapons_list[i] = new ArrayList(); // 0 - Main weapons | 1 - Additional weapons for ignore
+
 			kv.GetString((i == 0) ? "weapons" : "weapons_ignore", buffer, sizeof buffer);
 			TrimString(buffer);
 
@@ -149,10 +153,12 @@ public void CR_OnRoundStart(KeyValues kv)
 		}
 
 		// Additional parameters
-		weapons_block = view_as<bool>(kv.GetNum("weapons_block", 0));
-		weapons_save = view_as<bool>(kv.GetNum("weapons_save", 1));
-		weapons_no_knife = view_as<bool>(kv.GetNum("weapons_no_knife", 0));
-		weapons_clear_map = view_as<bool>(kv.GetNum("weapons_clear_map", 0));
+		weapons_block			= view_as<bool>(kv.GetNum("weapons_block", 0));
+		weapons_save			= view_as<bool>(kv.GetNum("weapons_save", 1));
+		weapons_no_knife		= view_as<bool>(kv.GetNum("weapons_no_knife", 0));
+
+		weapons_clear_map		= kv.GetNum("weapons_clear_map", 0);
+		weapons_no_equip_clear	= kv.GetNum("weapons_no_equip_clear", 0);
 
 		if (weapons_clear_map == 1 || weapons_clear_map == 3)
 		{
@@ -172,7 +178,10 @@ public void CR_OnRoundEnd(KeyValues kv)
 		{
 			if (IsClientInGame(i) && IsPlayerAlive(i))
 			{
-				ClearWeapons(i);
+				if (weapons_no_equip_clear == 0 || weapons_no_equip_clear == 2)
+				{
+					ClearWeapons(i);
+				}
 
 				if (weapons_no_knife)
 				{
