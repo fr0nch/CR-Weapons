@@ -1,4 +1,4 @@
-[CR] Weapons Equipper 2.0.0
+[CR] Weapons Equipper 2.1.0
 ===========================
 
 **[CR] Weapons Equipper** - модуль ядра **[Custom Rounds](https://github.com/SomethingFromSomewhere/Custom-Rounds)**, который позволяет выдавать оружия во время кастомного раунда. <br/>
