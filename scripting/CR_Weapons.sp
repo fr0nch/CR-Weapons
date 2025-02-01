@@ -26,8 +26,8 @@ public Plugin myinfo =
 {
 	name	= "[CR] Weapons Equipper",
 	version	= "2.1.0",
-	author	= "Fr4nch (vk.com/fr4nch)",
-	url		= "vk.com/fr4nch | discord.gg/3Crc3nVDKa"
+	author	= "Fr4nch (t.me/fr0nch)",
+	url		= "t.me/fr0nch | discord.gg/3Crc3nVDKa"
 };
 
 public void OnPluginStart() 
